@@ -4,7 +4,7 @@ import { Elements, CardElement, useStripe, useElements } from "@stripe/react-str
 
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
 
-const PRICE_PER_BAG = 0.50;
+const PRICE_PER_BAG = 1.00;
 const ZELLE = { name: "Zelle", handle: "3058770025" };
 const CASHAPP = { name: "Cash App", handle: "$05LPS" };
 const VENMO = { name: "Venmo", handle: "@Luca-Passalacqua" };
