@@ -15,7 +15,7 @@ async function sendSMS(body) {
   try {
     await transporter.sendMail({
       from: process.env.GMAIL_USER,
-      to: `3058770025@txt.att.net`,
+      to: "3058770025@txt.att.net",
       subject: "",
       text: body,
     });
@@ -30,18 +30,28 @@ export default async function handler(req, res) {
   const { action, paymentMethodId, amount, jobId, customerName, apt, bags, date, total } = req.body;
 
   if (action === "new_booking") {
-    await sendSMS(
-      `New BagRun booking!\nName: ${customerName}\nApt: ${apt}\nBags: ${bags}\nDate: ${date}\nTotal: $${total}\nJob ID: ${jobId}`
-    );
+    await sendSMS(`New BagRun booking!\nName: ${customerName}\nApt: ${apt}\nBags: ${bags}\nDate: ${date}\nTotal: $${total}\nJob ID: ${jobId}`);
     return res.status(200).json({ success: true });
   }
 
   if (action === "job_complete") {
-    await sendSMS(
-      `Job complete!\nName: ${customerName}\nApt: ${apt}\nBags: ${bags}\nJob ID: ${jobId}\nCharging card now...`
-    );
+    await sendSMS(`Job complete!\nName: ${customerName}\nApt: ${apt}\nBags: ${bags}\nJob ID: ${jobId}\nCharging card now...`);
   }
 
   try {
-    const paymentIntent = await
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount,
+      currency: "usd",
+      payment_method: paymentMethodId,
+      confirm: true,
+      automatic_payment_methods: { enabled: true, allow_redirects: "never" },
+      description: `BagRun pickup · ${jobId} · ${customerName}`,
+    });
+
+    await sendSMS(`Payment received!\nName: ${customerName}\nApt: ${apt}\nAmount: $${total}\nJob ID: ${jobId}`);
+
+    res.status(200).json({ success: true, paymentIntentId: paymentIntent.id });
+  } catch (err) {
+    res.status(200).json({ success: false, error: err.message });
+  }
 }
