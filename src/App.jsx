@@ -248,39 +248,7 @@ export default function App() {
     setCompleting(true);
     setCompleteError(null);
     try {
-if (completeModal.paymentMethod === "stripe" && completeModal.paymentMethodId) {
-  const res = await fetch("/api/charge", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      action: "job_complete",
-      paymentMethodId: completeModal.paymentMethodId,
-      amount: Math.round(completeModal.total * 100),
-      jobId: completeModal.id,
-      customerName: completeModal.name,
-      apt: completeModal.address,
-      bags: completeModal.bags,
-      date: completeModal.date,
-      total: completeModal.total.toFixed(2),
-    }),
-  });
-  const data = await res.json();
-  if (!data.success) { setCompleteError(data.error || "Charge failed."); setCompleting(false); return; }
-} else {
-  await fetch("/api/charge", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      action: "job_complete",
-      jobId: completeModal.id,
-      customerName: completeModal.name,
-      apt: completeModal.address,
-      bags: completeModal.bags,
-      date: completeModal.date,
-      total: completeModal.total.toFixed(2),
-    }),
-  });
-}
+      if (completeModal.paymentMethod === "stripe" && completeModal.paymentMethodId) {
         const res = await fetch("/api/charge", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -298,6 +266,20 @@ if (completeModal.paymentMethod === "stripe" && completeModal.paymentMethodId) {
         });
         const data = await res.json();
         if (!data.success) { setCompleteError(data.error || "Charge failed."); setCompleting(false); return; }
+      } else {
+        await fetch("/api/charge", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "job_complete",
+            jobId: completeModal.id,
+            customerName: completeModal.name,
+            apt: completeModal.address,
+            bags: completeModal.bags,
+            date: completeModal.date,
+            total: completeModal.total.toFixed(2),
+          }),
+        });
       }
       updateJob(completeModal.id, {
         status: completeModal.paymentMethod === "stripe" ? "paid" : "complete",
