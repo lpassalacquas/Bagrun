@@ -3,6 +3,7 @@ import { loadStripe } from "@stripe/stripe-js";
 import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
 
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
+const SHEETS_URL = import.meta.env.VITE_GOOGLE_SHEETS_URL;
 
 const PRICE_PER_BAG = 1.00;
 const ZELLE = { name: "Zelle", handle: "3058770025" };
@@ -98,6 +99,7 @@ body { font-family: 'Syne', sans-serif; background: #0C0C0C; color: #F0EDE8; min
 .pin-input:focus { border-color: #FF8C00; }
 .pin-error { color: #F87171; font-size: 12px; font-family: 'DM Mono', monospace; margin-top: 8px; }
 .error-msg { color: #F87171; font-size: 12px; font-family: 'DM Mono', monospace; margin-top: 8px; text-align: center; }
+.loading { text-align: center; padding: 3rem 0; color: #444; font-family: 'DM Mono', monospace; font-size: 13px; }
 `;
 
 const CARD_STYLE = {
@@ -111,6 +113,19 @@ const CARD_STYLE = {
     invalid: { color: "#F87171" },
   },
 };
+
+async function sheetsRequest(data) {
+  const res = await fetch(SHEETS_URL, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
+async function sheetsGet() {
+  const res = await fetch(SHEETS_URL);
+  return res.json();
+}
 
 function CheckoutForm({ job, onSuccess, onCancel }) {
   const stripe = useStripe();
@@ -160,9 +175,8 @@ export default function App() {
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [pin, setPin] = useState("");
   const [pinError, setPinError] = useState(false);
-  const [jobs, setJobs] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("bagrun_jobs") || "[]"); } catch { return []; }
-  });
+  const [jobs, setJobs] = useState([]);
+  const [loadingJobs, setLoadingJobs] = useState(false);
   const [customerForm, setCustomerForm] = useState({ name: "", apt: "", bags: "", date: "", notes: "" });
   const [checkoutJob, setCheckoutJob] = useState(null);
   const [submitted, setSubmitted] = useState(null);
@@ -175,13 +189,33 @@ export default function App() {
   const [completing, setCompleting] = useState(false);
   const [completeError, setCompleteError] = useState(null);
 
-  useEffect(() => {
-    try { localStorage.setItem("bagrun_jobs", JSON.stringify(jobs)); } catch {}
-  }, [jobs]);
+  async function fetchJobs() {
+    setLoadingJobs(true);
+    try {
+      const data = await sheetsGet();
+      if (data.success) setJobs(data.jobs.map(j => ({ ...j, bags: Number(j.bags), total: Number(j.total) })));
+    } catch (e) { console.error("Failed to fetch jobs", e); }
+    setLoadingJobs(false);
+  }
 
-  function saveJob(job) { setJobs(prev => [job, ...prev]); }
-  function updateJob(id, updates) { setJobs(prev => prev.map(j => j.id === id ? { ...j, ...updates } : j)); }
-  function deleteJob(id) { setJobs(prev => prev.filter(j => j.id !== id)); }
+  useEffect(() => {
+    if (view === "admin" && adminUnlocked) fetchJobs();
+  }, [view, adminUnlocked]);
+
+  async function saveJob(job) {
+    await sheetsRequest({ action: "create", ...job });
+    setJobs(prev => [job, ...prev]);
+  }
+
+  async function updateJob(id, updates) {
+    await sheetsRequest({ action: "update", id, ...updates });
+    setJobs(prev => prev.map(j => j.id === id ? { ...j, ...updates } : j));
+  }
+
+  async function deleteJob(id) {
+    await sheetsRequest({ action: "delete", id });
+    setJobs(prev => prev.filter(j => j.id !== id));
+  }
 
   function handleCustomerProceed() {
     const { name, apt, bags, date } = customerForm;
@@ -193,10 +227,10 @@ export default function App() {
       notes: customerForm.notes,
       status: "pending",
       total: parseInt(bags) * PRICE_PER_BAG,
-      paymentMethodId: null,
-      cardLast4: null,
+      paymentMethodId: "",
+      cardLast4: "",
       createdAt: new Date().toISOString(),
-      pickupPhoto: null, disposalPhoto: null,
+      pickupPhoto: "", disposalPhoto: "",
       paymentMethod: "stripe",
     };
     setCheckoutJob(job);
@@ -204,7 +238,7 @@ export default function App() {
 
   async function handlePaymentSuccess(paymentMethodId) {
     const job = { ...checkoutJob, paymentMethodId };
-    saveJob(job);
+    await saveJob(job);
     setSubmitted(job);
     setCheckoutJob(null);
     setCustomerForm({ name: "", apt: "", bags: "", date: "", notes: "" });
@@ -222,23 +256,21 @@ export default function App() {
           jobId: job.id,
         }),
       });
-    } catch (e) {
-      console.error("SMS notify failed:", e);
-    }
+    } catch (e) { console.error("SMS notify failed:", e); }
   }
 
-  function handleAdminAdd() {
+  async function handleAdminAdd() {
     const { name, apt, bags, date } = addForm;
     if (!name || !apt || !bags || !date) return;
     const job = {
       id: generateId(), name, address: `Apt ${apt}`,
       bags: parseInt(bags), date, notes: addForm.notes,
       status: "scheduled", total: parseInt(bags) * PRICE_PER_BAG,
-      paymentMethodId: null, cardLast4: null,
+      paymentMethodId: "", cardLast4: "",
       createdAt: new Date().toISOString(),
-      pickupPhoto: null, disposalPhoto: null, paymentMethod: "manual",
+      pickupPhoto: "", disposalPhoto: "", paymentMethod: "manual",
     };
-    saveJob(job);
+    await saveJob(job);
     setShowAddModal(false);
     setAddForm({ name: "", apt: "", bags: "", date: "", notes: "" });
   }
@@ -281,10 +313,8 @@ export default function App() {
           }),
         });
       }
-      updateJob(completeModal.id, {
-        status: completeModal.paymentMethod === "stripe" ? "paid" : "complete",
-        pickupPhoto, disposalPhoto,
-      });
+      const newStatus = completeModal.paymentMethod === "stripe" ? "paid" : "complete";
+      await updateJob(completeModal.id, { status: newStatus, pickupPhoto, disposalPhoto });
       setCompleteModal(null);
       setPickupPhoto(null);
       setDisposalPhoto(null);
@@ -307,7 +337,7 @@ export default function App() {
 
   const bagCount = parseInt(customerForm.bags) || 0;
   const price = (bagCount * PRICE_PER_BAG).toFixed(2);
-  const totalEarned = jobs.filter(j => j.status === "paid" || j.status === "complete").reduce((s, j) => s + j.total, 0);
+  const totalEarned = jobs.filter(j => j.status === "paid" || j.status === "complete").reduce((s, j) => s + Number(j.total), 0);
 
   return (
     <>
@@ -405,7 +435,10 @@ export default function App() {
           <div className="admin-page">
             <div className="admin-header">
               <div className="admin-title">Dashboard</div>
-              <button className="add-job-btn" onClick={() => setShowAddModal(true)}>+ Add job manually</button>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="add-job-btn" onClick={fetchJobs}>↻ Refresh</button>
+                <button className="add-job-btn" onClick={() => setShowAddModal(true)}>+ Add job</button>
+              </div>
             </div>
             <div className="stats-row">
               <div className="stat-card"><div className="stat-val">${totalEarned.toFixed(2)}</div><div className="stat-label">total earned</div></div>
@@ -413,7 +446,8 @@ export default function App() {
               <div className="stat-card"><div className="stat-val">{jobs.filter(j => j.status === "pending").length}</div><div className="stat-label">pending</div></div>
               <div className="stat-card"><div className="stat-val">{jobs.filter(j => j.status === "scheduled").length}</div><div className="stat-label">scheduled</div></div>
             </div>
-            {jobs.length === 0 && <div style={{ textAlign: "center", padding: "3rem 0", color: "#444", fontFamily: "DM Mono, monospace", fontSize: 13 }}>No jobs yet.</div>}
+            {loadingJobs && <div className="loading">Loading jobs...</div>}
+            {!loadingJobs && jobs.length === 0 && <div style={{ textAlign: "center", padding: "3rem 0", color: "#444", fontFamily: "DM Mono, monospace", fontSize: 13 }}>No jobs yet.</div>}
             <div className="jobs-list">
               {jobs.map(job => {
                 const sc = STATUS_COLORS[job.status] || STATUS_COLORS.pending;
@@ -425,7 +459,7 @@ export default function App() {
                     </div>
                     <div className="job-meta">
                       <div className="job-meta-item">Bags: <span>{job.bags}</span></div>
-                      <div className="job-meta-item">Total: <span>${job.total.toFixed(2)}</span></div>
+                      <div className="job-meta-item">Total: <span>${Number(job.total).toFixed(2)}</span></div>
                       <div className="job-meta-item">Date: <span>{job.date}</span></div>
                       <div className="job-meta-item">ID: <span>{job.id}</span></div>
                       <div className="job-meta-item">Pay: <span>{job.paymentMethod}</span></div>
@@ -474,7 +508,7 @@ export default function App() {
           <div className="modal-overlay" onClick={() => setCompleteModal(null)}>
             <div className="modal" onClick={e => e.stopPropagation()}>
               <h3>Complete · {completeModal.name}</h3>
-              <p style={{ fontSize: 12, color: "#666", fontFamily: "DM Mono, monospace", marginBottom: "1.25rem" }}>Upload both photos to confirm and {completeModal.paymentMethod === "stripe" ? `charge $${completeModal.total.toFixed(2)}` : "mark complete"}.</p>
+              <p style={{ fontSize: 12, color: "#666", fontFamily: "DM Mono, monospace", marginBottom: "1.25rem" }}>Upload both photos to confirm and {completeModal.paymentMethod === "stripe" ? `charge $${Number(completeModal.total).toFixed(2)}` : "mark complete"}.</p>
               <label className="form-label" style={{ marginBottom: 6 }}>Photo 1 — bags picked up</label>
               <label className="photo-upload-area">
                 <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => e.target.files[0] && readPhoto(e.target.files[0], setPickupPhoto)} />
@@ -489,7 +523,7 @@ export default function App() {
               <div className="modal-actions">
                 <button className="cancel-btn" onClick={() => { setCompleteModal(null); setPickupPhoto(null); setDisposalPhoto(null); setCompleteError(null); }}>Cancel</button>
                 <button className="submit-btn" style={{ width: "auto", padding: "9px 20px" }} onClick={handleCompleteJob} disabled={!pickupPhoto || !disposalPhoto || completing}>
-                  {completing ? "Processing..." : completeModal.paymentMethod === "stripe" ? `Charge $${completeModal.total.toFixed(2)}` : "Mark complete"}
+                  {completing ? "Processing..." : completeModal.paymentMethod === "stripe" ? `Charge $${Number(completeModal.total).toFixed(2)}` : "Mark complete"}
                 </button>
               </div>
             </div>
@@ -500,11 +534,11 @@ export default function App() {
           <div className="modal-overlay" onClick={() => setZelleModal(null)}>
             <div className="modal" onClick={e => e.stopPropagation()}>
               <h3>Collect payment · {zelleModal.name}</h3>
-              <p style={{ fontSize: 12, color: "#666", fontFamily: "DM Mono, monospace", marginBottom: "1.25rem" }}>Request ${zelleModal.total.toFixed(2)} via any of these:</p>
+              <p style={{ fontSize: 12, color: "#666", fontFamily: "DM Mono, monospace", marginBottom: "1.25rem" }}>Request ${Number(zelleModal.total).toFixed(2)} via any of these:</p>
               {[ZELLE, CASHAPP, VENMO].map(p => (
                 <div key={p.name} style={{ background: "#0C0C0C", border: "1px solid #2A2A2A", borderRadius: 8, padding: "12px 14px", marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div><div style={{ fontSize: 13, fontWeight: 600 }}>{p.name}</div><div style={{ fontSize: 12, color: "#666", fontFamily: "DM Mono, monospace" }}>{p.handle}</div></div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: "#FF8C00", fontFamily: "DM Mono, monospace" }}>${zelleModal.total.toFixed(2)}</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#FF8C00", fontFamily: "DM Mono, monospace" }}>${Number(zelleModal.total).toFixed(2)}</div>
                 </div>
               ))}
               <div className="modal-actions">
