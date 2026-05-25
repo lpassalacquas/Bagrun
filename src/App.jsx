@@ -113,11 +113,20 @@ const CARD_STYLE = {
     invalid: { color: "#F87171" },
   },
 };
-
 async function sheetsRequest(data) {
-  const res = await fetch(SHEETS_URL, {
+  const res = await fetch("/api/charge", {
     method: "POST",
-    body: JSON.stringify(data),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "sheets_" + data.action, ...data }),
+  });
+  return res.json();
+}
+
+async function sheetsGet() {
+  const res = await fetch("/api/charge", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "sheets_get" }),
   });
   return res.json();
 }
