@@ -40,7 +40,8 @@ async function sheetsGet() {
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const { action, paymentMethodId, amount, jobId, customerName, apt, bags, date, total, ...rest } = req.body;
+  const body = req.body;
+  const { action } = body;
 
   if (action === "sheets_get") {
     const data = await sheetsGet();
@@ -48,43 +49,51 @@ export default async function handler(req, res) {
   }
 
   if (action === "sheets_create") {
-    const data = await sheetsRequest({ action: "create", ...rest, jobId });
+    const { action: _, ...jobData } = body;
+    const data = await sheetsRequest({ action: "create", ...jobData });
     return res.status(200).json(data);
   }
 
   if (action === "sheets_update") {
-    const data = await sheetsRequest({ action: "update", ...rest, id: rest.id });
+    const { action: _, ...updateData } = body;
+    const data = await sheetsRequest({ action: "update", ...updateData });
     return res.status(200).json(data);
   }
 
   if (action === "sheets_delete") {
-    const data = await sheetsRequest({ action: "delete", id: rest.id });
+    const { action: _, ...deleteData } = body;
+    const data = await sheetsRequest({ action: "delete", ...deleteData });
     return res.status(200).json(data);
   }
 
   if (action === "new_booking") {
+    const { customerName, apt, bags, date, total, jobId } = body;
     await sendSMS(`New BagRun booking!\nName: ${customerName}\nApt: ${apt}\nBags: ${bags}\nDate: ${date}\nTotal: $${total}\nJob ID: ${jobId}`);
     return res.status(200).json({ success: true });
   }
 
   if (action === "job_complete") {
+    const { customerName, apt, bags, jobId, paymentMethodId, amount, total } = body;
     await sendSMS(`Job complete!\nName: ${customerName}\nApt: ${apt}\nBags: ${bags}\nJob ID: ${jobId}\nCharging card now...`);
+
+    if (paymentMethodId && amount) {
+      try {
+        const paymentIntent = await stripe.paymentIntents.create({
+          amount,
+          currency: "usd",
+          payment_method: paymentMethodId,
+          confirm: true,
+          automatic_payment_methods: { enabled: true, allow_redirects: "never" },
+          description: `BagRun pickup · ${jobId} · ${customerName}`,
+        });
+        await sendSMS(`Payment received!\nName: ${customerName}\nApt: ${apt}\nAmount: $${total}\nJob ID: ${jobId}`);
+        return res.status(200).json({ success: true, paymentIntentId: paymentIntent.id });
+      } catch (err) {
+        return res.status(200).json({ success: false, error: err.message });
+      }
+    }
+    return res.status(200).json({ success: true });
   }
 
-  try {
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount,
-      currency: "usd",
-      payment_method: paymentMethodId,
-      confirm: true,
-      automatic_payment_methods: { enabled: true, allow_redirects: "never" },
-      description: `BagRun pickup · ${jobId} · ${customerName}`,
-    });
-
-    await sendSMS(`Payment received!\nName: ${customerName}\nApt: ${apt}\nAmount: $${total}\nJob ID: ${jobId}`);
-
-    res.status(200).json({ success: true, paymentIntentId: paymentIntent.id });
-  } catch (err) {
-    res.status(200).json({ success: false, error: err.message });
-  }
+  return res.status(200).json({ success: false, error: "Unknown action" });
 }
