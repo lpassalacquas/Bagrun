@@ -3,7 +3,6 @@ import { loadStripe } from "@stripe/stripe-js";
 import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
 
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
-const SHEETS_URL = import.meta.env.VITE_GOOGLE_SHEETS_URL;
 
 const PRICE_PER_BAG = 1.00;
 const ZELLE = { name: "Zelle", handle: "3058770025" };
@@ -113,6 +112,7 @@ const CARD_STYLE = {
     invalid: { color: "#F87171" },
   },
 };
+
 async function sheetsRequest(data) {
   const res = await fetch("/api/charge", {
     method: "POST",
@@ -128,11 +128,6 @@ async function sheetsGet() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action: "sheets_get" }),
   });
-  return res.json();
-}
-
-async function sheetsGet() {
-  const res = await fetch(SHEETS_URL);
   return res.json();
 }
 
