@@ -24,10 +24,43 @@ async function sendSMS(body) {
   }
 }
 
+async function sheetsRequest(data) {
+  const res = await fetch(process.env.GOOGLE_SHEETS_URL, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
+async function sheetsGet() {
+  const res = await fetch(process.env.GOOGLE_SHEETS_URL);
+  return res.json();
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const { action, paymentMethodId, amount, jobId, customerName, apt, bags, date, total } = req.body;
+  const { action, paymentMethodId, amount, jobId, customerName, apt, bags, date, total, ...rest } = req.body;
+
+  if (action === "sheets_get") {
+    const data = await sheetsGet();
+    return res.status(200).json(data);
+  }
+
+  if (action === "sheets_create") {
+    const data = await sheetsRequest({ action: "create", ...rest, jobId });
+    return res.status(200).json(data);
+  }
+
+  if (action === "sheets_update") {
+    const data = await sheetsRequest({ action: "update", ...rest, id: rest.id });
+    return res.status(200).json(data);
+  }
+
+  if (action === "sheets_delete") {
+    const data = await sheetsRequest({ action: "delete", id: rest.id });
+    return res.status(200).json(data);
+  }
 
   if (action === "new_booking") {
     await sendSMS(`New BagRun booking!\nName: ${customerName}\nApt: ${apt}\nBags: ${bags}\nDate: ${date}\nTotal: $${total}\nJob ID: ${jobId}`);
